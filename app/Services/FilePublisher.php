@@ -16,6 +16,14 @@ class FilePublisher
             $prefix . 'name'                           => ['required_without:' . $prefix . 'song_id', 'nullable', 'string', 'max:255'],
             $prefix . 'artist_ids'                     => ['nullable', 'array', 'max:30'], $prefix . 'artist_ids.*' => ['uuid', Rule::exists('artists', 'id')->whereNull('deleted_at')],
             $prefix . 'artist_name'                    => ['nullable', 'string', 'max:255'],
+            $prefix . 'musicbrainz_id'                    => ['nullable', 'uuid'],
+            $prefix . 'release_date'                      => ['nullable', 'date_format:Y-m-d'],
+            $prefix . 'genre'                            => ['nullable', 'string', 'max:100'],
+            $prefix . 'artist_credits'                    => ['sometimes', 'array', 'max:30'],
+            $prefix . 'artist_credits.*.musicbrainz_id'   => ['nullable', 'uuid'],
+            $prefix . 'artist_credits.*.name'             => ['required', 'string', 'max:255'],
+            $prefix . 'artist_credits.*.credited_name'    => ['nullable', 'string', 'max:255'],
+            $prefix . 'artist_credits.*.joinphrase'       => ['nullable', 'string', 'max:50'],
             $prefix . 'recording_song_id'              => ['nullable', 'uuid', Rule::exists('songs', 'id')->whereNull('deleted_at')],
             $prefix . 'album'                          => ['nullable', 'array'],
             ...app(AlbumCatalog::class)->draftRules($prefix . 'album.'),
@@ -66,6 +74,15 @@ class FilePublisher
             $data = $receipts->resolve($user, $file, $data, $key);
             abort_if($file->song_id !== null && $file->song_id !== ($data['song_id'] ?? null), 409, '这份音频已经加入歌曲，请选择原歌曲来补充专辑关联。');
             $albumId = $data['album_id'] ?? null;
+            if (!empty($data['musicbrainz_id'])) {
+                $known = Models\Song::withTrashed()->where('musicbrainz_id', $data['musicbrainz_id'])->lockForUpdate()->first();
+                if ($known) {
+                    abort_if($known->trashed(), 422, '这首 MusicBrainz 录音对应的歌曲已删除，请先恢复资料。');
+                    abort_if(!empty($data['song_id']) && $data['song_id'] !== $known->id, 409, '这个 MusicBrainz recording ID 已对应其他歌曲，请选择该歌曲以避免重复。');
+                    $data['song_id'] = $known->id;
+                    unset($data['recording_song_id']);
+                }
+            }
             if (!empty($data['album'])) {
                 abort_if($albumId, 422, '请选择已有专辑或新建专辑。');
                 $albumId = app(AlbumCatalog::class)->create($user, $data['album'])->id;
@@ -75,15 +92,38 @@ class FilePublisher
                 $song = Models\Song::select(Models\Song::FIELDS)->lockForUpdate()->findOrFail($data['song_id']);
                 abort_if(!empty($data['recording_song_id']), 422, '请选择已有歌曲或新建录音版本。');
                 $beforeAlbums = app(Activity::class)->snapshot($song);
+                if (!empty($data['musicbrainz_id']) && !empty($song->musicbrainz_id) && $song->musicbrainz_id !== $data['musicbrainz_id']) {
+                    abort(409, '所选歌曲已绑定不同的 MusicBrainz recording ID。');
+                }
+                if (!empty($data['musicbrainz_id']) && empty($song->musicbrainz_id)) {
+                    $song->musicbrainz_id = $data['musicbrainz_id'];
+                }
+                foreach (['release_date', 'genre'] as $field) {
+                    if (blank($song->$field) && !blank($data[$field] ?? null)) {
+                        $song->$field = $data[$field];
+                    }
+                }
+                if (!empty($data['artist_credits'])) {
+                    $artistIds = app(ArtistNames::class)->resolve($user, [], null, $data['artist_credits']);
+                    $song->artists()->syncWithoutDetaching($artistIds);
+                }
+                if ($song->isDirty()) {
+                    $song->version++;
+                    $song->save();
+                    app(Activity::class)->record($user, 'updated', 'songs', $song, $beforeAlbums, '根据确认的上传资料补全歌曲信息');
+                }
             } else {
                 $source = !empty($data['recording_song_id']) ? Models\Song::select(Models\Song::FIELDS)->findOrFail($data['recording_song_id']) : null;
-                $artists = app(ArtistNames::class)->resolve($user, $data['artist_ids'] ?? [], $data['artist_name'] ?? null);
+                $artists = app(ArtistNames::class)->resolve($user, $data['artist_ids'] ?? [], $data['artist_name'] ?? null, $data['artist_credits'] ?? []);
                 $libraryId = $data['library_id'] ?? Models\MediaLibrary::ensureDefault($user)->id;
                 Models\MediaLibrary::select(['id'])->lockForUpdate()->findOrFail($libraryId);
                 $song = Models\Song::create([
                     'name'              => trim($data['name']), 'user_id' => $user->id, 'library_id' => $libraryId,
                     'recording_id'      => $source?->recording_id,
                     'recording_version' => $data['recording_version'] ?? '',
+                    'musicbrainz_id'   => $data['musicbrainz_id'] ?? null,
+                    'release_date'     => $data['release_date'] ?? null,
+                    'genre'            => $data['genre'] ?? '',
                 ]);
                 if ($source) {
                     app(Lyrics::class)->replace($song, app(Lyrics::class)->versions($source));

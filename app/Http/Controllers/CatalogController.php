@@ -15,8 +15,9 @@ class CatalogController extends Controller
         if ($type === 'libraries') {
             Models\MediaLibrary::ensureDefault($request->user());
         }
-        $data = $request->validate(['q' => ['nullable', 'string', 'max:100'], 'sort' => ['nullable', 'in:latest,name,oldest'], 'album_id' => ['nullable', 'uuid'], 'library_id' => ['nullable', 'uuid'], 'artist_id' => ['nullable', 'uuid'], 'quality' => ['nullable', 'in:standard,high,lossless,hires'], 'mine' => ['nullable', 'boolean'], 'favorites' => ['nullable', 'boolean'], 'missing' => ['nullable', 'boolean'], 'page' => ['nullable', 'integer', 'min:1']]);
+        $data = $request->validate(['q' => ['nullable', 'string', 'max:100'], 'musicbrainz_id' => ['nullable', 'uuid'], 'sort' => ['nullable', 'in:latest,name,oldest'], 'album_id' => ['nullable', 'uuid'], 'library_id' => ['nullable', 'uuid'], 'artist_id' => ['nullable', 'uuid'], 'quality' => ['nullable', 'in:standard,high,lossless,hires'], 'mine' => ['nullable', 'boolean'], 'favorites' => ['nullable', 'boolean'], 'missing' => ['nullable', 'boolean'], 'page' => ['nullable', 'integer', 'min:1']]);
         $q = $class::select($type === 'songs' ? array_map(fn($f) => 'songs.' . $f, Models\Song::LIST_FIELDS) : $class::FIELDS);
+        if ($type === 'songs' && !empty($data['musicbrainz_id'])) { $q->where('songs.musicbrainz_id', $data['musicbrainz_id']); }
         if (!empty($data['q'])) {
             $q->where('name', 'ilike', '%' . addcslashes($data['q'], '%_\\') . '%');
         }
