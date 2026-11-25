@@ -20,6 +20,12 @@ class User extends Base implements AuthenticatableContract
 
     protected $attributes = ['role' => 'user', 'quality' => 'high'];
 
+    public function getAuthPasswordName(): string
+    {
+        // EMOS verifies passwords; bind Laravel's remember cookie to the revocable local token.
+        return $this->getRememberTokenName();
+    }
+
     public function scopeNamed(Builder $query, string $term): void
     {
         $pattern = '%' . addcslashes($term, '%_\\') . '%';
