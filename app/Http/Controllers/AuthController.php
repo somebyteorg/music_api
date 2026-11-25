@@ -69,7 +69,12 @@ class AuthController extends Controller
 
     public function login(Request $r)
     {
-        $data = $r->validate(['username' => ['required', 'string', 'max:100'], 'password' => ['required', 'string', 'max:255']]);
+        $data = $r->validate([
+            'token'    => ['nullable', 'string', 'max:4096'],
+            'username' => ['required_without:token', 'string', 'max:100'],
+            'password' => ['required_without:token', 'string', 'max:255'],
+        ]);
+        abort_if(empty($data['token']) && (empty($data['username']) || empty($data['password'])), 422, '请输入 EMOS 登录令牌或账号密码。');
         $user = $this->authenticate($r, $data);
 
         return ['user' => $user, 'csrf_token' => csrf_token()];

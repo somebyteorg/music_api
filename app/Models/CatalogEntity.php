@@ -9,7 +9,7 @@ abstract class CatalogEntity extends Base
 {
     use HasUuids, SoftDeletes;
 
-    const FIELDS = ['id', 'name', 'description', 'todb_id', 'image_url', 'cover_id', 'user_id', 'version', 'metadata_updated_at', 'created_at', 'updated_at', 'deleted_at'];
+    const FIELDS = ['id', 'name', 'description', 'todb_id', 'musicbrainz_id', 'image_url', 'cover_id', 'user_id', 'version', 'metadata_updated_at', 'created_at', 'updated_at', 'deleted_at'];
 
     protected $attributes = ['description' => '', 'version' => 1];
 

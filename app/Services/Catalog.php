@@ -83,6 +83,9 @@ class Catalog
                 'artist_ids.*' => ['uuid', 'distinct', Rule::exists('artists', 'id')->whereNull('deleted_at')],
             ];
         }
+        if (in_array($type, ['songs', 'artists'], true)) {
+            $rules['musicbrainz_id'] = ['nullable', 'uuid', Rule::unique($type, 'musicbrainz_id')->ignore($id)];
+        }
         if ($type === 'songs') {
             $rules += [
                 'library_id'            => ['required', 'uuid', Rule::exists('libraries', 'id')->whereNull('deleted_at')],

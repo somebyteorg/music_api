@@ -56,6 +56,10 @@ Route::middleware('auth')->group(function () {
     Route::get('metadata/{type}/search', [Controllers\MetadataController::class, 'search'])->whereIn('type', ['songs', 'albums', 'artists']);
     Route::get('catalog/{type}/{id}/metadata', [Controllers\MetadataController::class, 'preview'])->whereUuid('id')->whereIn('type', ['songs', 'albums', 'artists']);
     Route::post('catalog/{type}/{id}/metadata', [Controllers\MetadataController::class, 'apply'])->whereUuid('id')->whereIn('type', ['songs', 'albums', 'artists']);
+    Route::get('metadata/musicbrainz/releases/search', [Controllers\MusicBrainzController::class, 'search'])->middleware('throttle:10,1');
+    Route::get('metadata/musicbrainz/releases/{id}/cover', [Controllers\MusicBrainzController::class, 'cover'])->whereUuid('id')->middleware('throttle:10,1');
+    Route::get('metadata/musicbrainz/releases/{id}', [Controllers\MusicBrainzController::class, 'show'])->whereUuid('id')->middleware('throttle:10,1');
+    Route::post('metadata/public-album/preview', [Controllers\PublicAlbumPageController::class, 'preview'])->middleware('throttle:10,1');
     Route::get('catalog/{type}', [Controllers\CatalogController::class, 'index']);
     Route::post('catalog/{type}', [Controllers\CatalogController::class, 'store']);
     Route::get('catalog/{type}/{id}', [Controllers\CatalogController::class, 'show'])->whereUuid('id');
