@@ -13,9 +13,9 @@ Artisan::command('music:sync', function () {
     $this->info('已安排音乐库同步。');
 });
 Artisan::command('music:sync-now', function () {
-    app(Services\SyncScheduler::class)->touch(full: true);
-    (new Jobs\SyncLibrary)->handle(app(Services\NavidromeSync::class));
-    $this->info('音乐库同步完成。');
+    app(Services\SyncScheduler::class)->touch(full: true, dispatch: false);
+    $finished = (new Jobs\SyncLibrary)->handle(app(Services\NavidromeSync::class));
+    $this->info($finished ? '音乐库同步完成。' : '音乐库尚有待处理的变更，将由队列继续同步。');
 });
 Schedule::job(new Jobs\SyncLibrary)->everyMinute()->withoutOverlapping();
 Schedule::call(function () {

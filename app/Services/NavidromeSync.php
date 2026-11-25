@@ -61,18 +61,16 @@ class NavidromeSync
                     }
                 } else {
                     $changedLibraries = $allLibraries->whereIn('id', $groups['libraries'] ?? []);
+                    $publishedIds = $this->table('library')->whereIn('id', $libraries->pluck('playback_id'))->pluck('id');
+                    $changedLibraries = $changedLibraries->merge($libraries->whereNotIn('playback_id', $publishedIds));
                     $this->syncLibraries($changedLibraries);
                     $libraryIds = [...$libraryIds, ...$changedLibraries->pluck('playback_id')->all()];
                 }
                 foreach ($this->artists($full, $groups['artists'] ?? []) as $artist) {
-                    $id = 'music-'.$artist->id;
-                    $this->put('artist', ['id' => $id, 'name' => $artist->name, 'order_artist_name' => mb_strtolower($artist->name), 'biography' => $artist->description,
-                        'small_image_url' => $artist->image_url ?? '', 'medium_image_url' => $artist->image_url ?? '', 'large_image_url' => $artist->image_url ?? '',
-                        'full_text' => $artist->name.' '.$artist->description, 'search_normalized' => $artist->name, 'missing' => $artist->trashed(), 'created_at' => $artist->created_at, 'updated_at' => $artist->updated_at]);
-                    $this->syncCover($id, $artist->trashed() ? null : $artist->cover_id, $artist->trashed() ? null : $artist->image_url);
+                    $this->syncArtist($artist);
                 }
                 $tags = app(PlaybackTags::class);
-                foreach ($this->songs($songIds) as $song) {
+                foreach ($this->songs($songIds, $full) as $song) {
                     $file = $song->files->firstWhere('is_default', true) ?? $song->files->first();
                     $library = $libraries->get($song->library_id);
                     if (!$file || !$library) {
@@ -94,7 +92,8 @@ class NavidromeSync
                         'bitrate' => $resource->bitrate, 'sample_rate' => $resource->sample_rate, 'bit_depth' => $resource->bit_depth, 'channels' => $resource->channels,
                         'codec' => $resource->codec, 'size' => $resource->file_size, 'duration' => $resource->duration, 'created_at' => $resource->created_at])->all();
                     foreach (array_chunk($resources, 500) as $rows) {
-                        $this->table('music_resource')->insert($rows);
+                        // A resource can move to this song before its former song is processed.
+                        $this->table('music_resource')->upsert($rows, ['id']);
                     }
                 }
                 app(PlaybackStatistics::class)->refresh($albumIds, $libraryIds);
@@ -157,7 +156,29 @@ class NavidromeSync
         }
     }
 
-    private function songs(array $songIds): \Generator
+    private function syncArtist(Models\Artist $artist): void
+    {
+        $id = 'music-'.$artist->id;
+        $this->put('artist', ['id' => $id, 'name' => $artist->name, 'order_artist_name' => mb_strtolower($artist->name), 'biography' => $artist->description,
+            'small_image_url' => $artist->image_url ?? '', 'medium_image_url' => $artist->image_url ?? '', 'large_image_url' => $artist->image_url ?? '',
+            'full_text' => $artist->name.' '.$artist->description, 'search_normalized' => $artist->name, 'missing' => $artist->trashed(), 'created_at' => $artist->created_at, 'updated_at' => $artist->updated_at]);
+        $this->syncCover($id, $artist->trashed() ? null : $artist->cover_id, $artist->trashed() ? null : $artist->image_url);
+    }
+
+    private function syncMissingArtists(Collection $songs): void
+    {
+        $albumArtists = $songs->pluck('albums')->collapse()->pluck('artists')->collapse();
+        $artistIds = $songs->pluck('artists')->collapse()->concat($albumArtists)->pluck('id')->unique();
+        foreach ($artistIds->chunk(self::ID_BATCH_SIZE) as $ids) {
+            $publishedIds = $this->table('artist')->whereIn('id', $ids->map(fn($id) => 'music-'.$id))->pluck('id')->flip();
+            $missingIds = $ids->reject(fn($id) => $publishedIds->has('music-'.$id))->all();
+            foreach ($this->artists(false, $missingIds) as $artist) {
+                $this->syncArtist($artist);
+            }
+        }
+    }
+
+    private function songs(array $songIds, bool $full): \Generator
     {
         $songs = Models\Song::select(Models\Song::FIELDS)->with([
             'lyrics' => fn($q) => $q->select(['id', 'song_id', 'is_default', 'structured'])->where('is_default', true),
@@ -172,6 +193,9 @@ class NavidromeSync
             }
             foreach ($batch->pluck('files')->collapse()->chunk(self::ID_BATCH_SIZE) as $files) {
                 (new Collection($files))->load('uploader:id,username,pseudonym');
+            }
+            if (!$full) {
+                $this->syncMissingArtists($batch);
             }
 
             yield from $batch;

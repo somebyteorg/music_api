@@ -42,13 +42,15 @@ class SyncScheduler
         }
     }
 
-    public function touch(bool $full = false): void
+    public function touch(bool $full = false, bool $dispatch = true): void
     {
         if ($full) {
             $this->mark('full', '');
         }
         Models\SyncState::select(['id'])->firstOrCreate(['id' => 'library']);
         Models\SyncState::whereKey('library')->increment('revision', 1, ['error' => null]);
-        DB::afterCommit(fn() => Jobs\SyncLibrary::dispatch()->delay(now()->addSeconds(3)));
+        if ($dispatch) {
+            DB::afterCommit(fn() => Jobs\SyncLibrary::dispatch()->delay(now()->addSeconds(3)));
+        }
     }
 }
